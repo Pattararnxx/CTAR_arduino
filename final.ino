@@ -13,11 +13,11 @@ NAU7802 myScale;
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
 // ===== I2C =====
-const int I2C_SDA = 0;
-const int I2C_SCL = 19;
+const int I2C_SDA = 20;
+const int I2C_SCL = 18;
 
 // const int DRDY = 10;
-// const int BATTERY_PIN = 2;   // GPIO2 = A0.
+const int BATTERY_PIN = A1;   // GPIO2 = A0.
 
 // ===== BLE =====
 BLEServer* pServer = NULL;
@@ -35,68 +35,68 @@ const float ALPHA = 0.2;
 float filtered_weight = 0.0;
 float filtered_force = 0.0;
 
-// float readBatteryVoltage() {
-//   uint32_t sum = 0;
+float readBatteryVoltage() {
+  uint32_t sum = 0;
 
-//   for (int i = 0; i < 32; i++) {
-//     sum += analogReadMilliVolts(BATTERY_PIN);
-//     delay(2);
-//   }
+  for (int i = 0; i < 32; i++) {
+    sum += analogReadMilliVolts(BATTERY_PIN);
+    delay(2);
+  }
 
-//   float adcVoltage = sum / 32.0f;
+  float adcVoltage = sum / 32.0f;
 
-//   return (adcVoltage * 2.0f) / 1000.0f;
-// }
+  return (adcVoltage * 2.0f) / 1000.0f;
+}
 
-// uint8_t batteryPercent(float v) {
+uint8_t batteryPercent(float v) {
 
-//   if (v >= 4.20f) return 100;
-//   if (v <= 3.30f) return 0;
+  if (v >= 4.20f) return 100;
+  if (v <= 3.30f) return 0;
 
-//   const float voltageTable[] = {
-//     4.20, 4.10, 4.00, 3.90,
-//     3.80, 3.70, 3.60, 3.50,
-//     3.30
-//   };
+  const float voltageTable[] = {
+    4.20, 4.10, 4.00, 3.90,
+    3.80, 3.70, 3.60, 3.50,
+    3.30
+  };
 
-//   const int percentTable[] = {
-//     100, 90, 80, 65,
-//     45, 25, 10, 5,
-//     0
-//   };
+  const int percentTable[] = {
+    100, 90, 80, 65,
+    45, 25, 10, 5,
+    0
+  };
 
-//   const int N =
-//       sizeof(voltageTable) /
-//       sizeof(float);
+  const int N =
+      sizeof(voltageTable) /
+      sizeof(float);
 
-//   for (int i = 0; i < N - 1; i++) {
+  for (int i = 0; i < N - 1; i++) {
 
-//     if (v <= voltageTable[i] &&
-//         v > voltageTable[i + 1]) {
+    if (v <= voltageTable[i] &&
+        v > voltageTable[i + 1]) {
 
-//       float v1 = voltageTable[i];
-//       float v2 = voltageTable[i + 1];
+      float v1 = voltageTable[i];
+      float v2 = voltageTable[i + 1];
 
-//       int p1 = percentTable[i];
-//       int p2 = percentTable[i + 1];
+      int p1 = percentTable[i];
+      int p2 = percentTable[i + 1];
 
-//       float percent =
-//           p1 +
-//           (v - v1) *
-//           (p2 - p1) /
-//           (v2 - v1);
+      float percent =
+          p1 +
+          (v - v1) *
+          (p2 - p1) /
+          (v2 - v1);
 
-//       return (uint8_t)(percent + 0.5f);
-//     }
-//   }
+      return (uint8_t)(percent + 0.5f);
+    }
+  }
 
-//   return 0;
-// }
+  return 0;
+}
 
 // ===== Packet (ส่งหลายค่าแบบ binary) =====
 struct DataPacket {
   float force;
-  // uint8_t battery;
+  uint8_t battery;
 };
 
 // ===== Interrupt Service Routine =====
@@ -150,11 +150,9 @@ void setupBLE() {
 // ===== Setup =====
 void setup() {
   Serial.begin(115200);
-//   pinMode(BATTERY_PIN, INPUT);
-// analogReadResolution(12);
-// analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
-  // pinMode(LED_PIN, OUTPUT); 
-  // digitalWrite(LED_PIN, HIGH);
+  pinMode(BATTERY_PIN, INPUT);
+analogReadResolution(12);
+analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
   Serial.println("เริ่มระบบวัดแรง CTAR (NAU7802)...");
 
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -209,12 +207,12 @@ void loop() {
     Serial.println(filtered_force, 3);
 
     // ===== ส่ง BLE (binary packet) =====
-  if (deviceConnected) {
+//   if (deviceConnected) {
 
-    float safe_force =
-        (filtered_force < 0.0f)
-        ? 0.0f
-        : filtered_force;
+//     float safe_force =
+//         (filtered_force < 0.0f)
+//         ? 0.0f
+//         : filtered_force;
 
 //     int rawADC = analogRead(BATTERY_PIN);
 // int mv = analogReadMilliVolts(BATTERY_PIN);
@@ -233,19 +231,52 @@ void loop() {
 // Serial.print(battery);
 // Serial.println("%)");
 
-    DataPacket data = {
+//     DataPacket data = {
+//         safe_force,
+//         battery
+//     };
+
+//     pCharacteristic->setValue(
+//         (uint8_t*)&data,
+//         sizeof(data)
+//     );
+//     pCharacteristic->notify();
+// }
+//test
+if (deviceConnected) {
+
+    float safe_force =
+        (filtered_force < 0.0f)
+        ? 0.0f
+        : filtered_force;
+
+    float batteryVoltage = readBatteryVoltage();
+    uint8_t battery = batteryPercent(batteryVoltage);
+
+    // ส่งข้อมูลสั้น ๆ
+    char message[32];
+
+    snprintf(
+        message,
+        sizeof(message),
+        "%.2f,%.2f,%d",
         safe_force,
-        // battery
-    };
+        batteryVoltage,
+        battery
+    );
 
     pCharacteristic->setValue(
-        (uint8_t*)&data,
-        sizeof(data)
+        (uint8_t*)message,
+        strlen(message)
     );
+
     pCharacteristic->notify();
+
+    Serial.print("BLE SEND: ");
+    Serial.println(message);
 }
 
-  delay(20);
+  delay(200);
   }
 }
 

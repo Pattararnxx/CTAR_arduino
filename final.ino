@@ -25,6 +25,22 @@ float lastVoltage = 0.0;
 unsigned long lastBlink = 0;
 bool ledState = false;
 
+unsigned long lastCheckTime = 0;
+const unsigned long CHECK_INTERVAL = 3000;   // เช็คแนวโน้มทุก 3 วิ (กัน noise)
+const float RISE_THRESHOLD = 0.03;           // ต้องขึ้นเกินนี้ถึงนับว่า "ขึ้น"
+int riseStreak = 0;                          // นับจำนวนครั้งติดกันที่แรงดันขึ้น
+const int RISE_STREAK_NEEDED = 3;            // ต้องขึ้นติดกัน 3 ครั้ง ถึงยืนยันว่ากำลังชาร์จ
+bool chargingConfirmed = false;
+
+// กรองแรงดันด้วย EMA แยกต่างหาก (ลด noise ของ ADC ก่อนเช็คแนวโน้ม)
+float filteredVoltage = 0.0;
+const float VOLTAGE_ALPHA = 0.05; // ยิ่งน้อยยิ่งนิ่ง แต่ตอบสนองช้าลง
+
+// ===== ติดตามว่า "เสียบสายชาร์จอยู่จริงไหม" (แยกจาก % แบต) =====
+bool cableConnected = false;
+float peakVoltage = 0.0;
+const float DROP_THRESHOLD = 0.03; // แรงดันร่วงเกินนี้จาก peak = ถือว่าถอดสายแล้ว
+
 // ===== BLE =====
 BLEServer* pServer = NULL;
 BLECharacteristic* pCharacteristic = NULL;
@@ -44,25 +60,26 @@ float filtered_force = 0.0;
 float readBatteryVoltage() {
   uint32_t sum = 0;
 
-  for (int i = 0; i < 32; i++) {
+  for (int i = 0; i < 64; i++) {
     sum += analogReadMilliVolts(BATTERY_PIN);
     delay(2);
   }
 
-  float adcVoltage = sum / 32.0f;
+  float adcVoltage = sum / 64.0f;
 
   return (adcVoltage * 2.0f) / 1000.0f;
 }
 
+// ===== เต็มที่ 3.3V, หมดที่ 2.7V (สเกลรูปทรงกราฟเดิม) =====
 uint8_t batteryPercent(float v) {
 
-  if (v >= 4.20f) return 100;
-  if (v <= 3.30f) return 0;
+  if (v >= 3.30f) return 100;
+  if (v <= 2.70f) return 0;
 
   const float voltageTable[] = {
-    4.20, 4.10, 4.00, 3.90,
-    3.80, 3.70, 3.60, 3.50,
-    3.30
+    3.30, 3.2333, 3.1667, 3.10,
+    3.0333, 2.9667, 2.90, 2.8333,
+    2.70
   };
 
   const int percentTable[] = {
@@ -100,23 +117,63 @@ uint8_t batteryPercent(float v) {
 }
 
 // ===== Status LED: กะพริบ = กำลังชาร์จ, ติดค้าง = แบตเต็ม, ดับ = ปกติ =====
-void updateStatusLED(float voltage, uint8_t percent) {
-  bool full = (percent >= 98);
-  bool charging = (voltage > lastVoltage + 0.01);
+void updateStatusLED(uint8_t percent) {
+  // ===== เช็คแนวโน้มแรงดัน (ที่กรองแล้ว) เป็นช่วงๆ =====
+  if (millis() - lastCheckTime > CHECK_INTERVAL) {
 
+    if (filteredVoltage > lastVoltage + RISE_THRESHOLD) {
+      riseStreak++;                 // แรงดันขึ้นต่อเนื่อง
+    } else {
+      riseStreak = 0;                // หลุดแนวโน้ม รีเซ็ต
+    }
+
+    chargingConfirmed = (riseStreak >= RISE_STREAK_NEEDED);
+
+    // ===== ตรวจจับเสียบ/ถอดสาย =====
+    if (chargingConfirmed) {
+      cableConnected = true;
+    }
+
+    if (cableConnected) {
+      if (filteredVoltage > peakVoltage) {
+        peakVoltage = filteredVoltage; // อัปเดต peak ระหว่างชาร์จ/เต็ม
+      } else if (filteredVoltage < peakVoltage - DROP_THRESHOLD) {
+        // แรงดันร่วงจาก peak ชัดเจน = ถอดสายแล้ว
+        cableConnected = false;
+        peakVoltage = 0.0;
+      }
+    }
+
+    // ===== Debug: ดูสถานะการตรวจจับชาร์จ =====
+    Serial.print("[LED] filtV:");
+    Serial.print(filteredVoltage, 3);
+    Serial.print(" lastV:");
+    Serial.print(lastVoltage, 3);
+    Serial.print(" riseStreak:");
+    Serial.print(riseStreak);
+    Serial.print(" charging:");
+    Serial.print(chargingConfirmed ? "YES" : "no");
+    Serial.print(" cable:");
+    Serial.println(cableConnected ? "IN" : "OUT");
+
+    lastVoltage = filteredVoltage;
+    lastCheckTime = millis();
+  }
+
+  bool full = (percent >= 98) && cableConnected; // เต็มได้ก็ต่อเมื่อเสียบสายอยู่เท่านั้น
+
+  // ===== อัปเดต LED ตามสถานะที่ยืนยันแล้ว =====
   if (full) {
-    digitalWrite(STATUS_LED, LOW); // ติดค้าง
-  } else if (charging) {
+    digitalWrite(STATUS_LED, LOW); // ติดค้าง = เต็ม (และเสียบสายอยู่)
+  } else if (chargingConfirmed || cableConnected) {
     if (millis() - lastBlink > 500) {
       ledState = !ledState;
-      digitalWrite(STATUS_LED, ledState ? LOW : HIGH);
+      digitalWrite(STATUS_LED, ledState ? LOW : HIGH); // กะพริบ = กำลังชาร์จ
       lastBlink = millis();
     }
   } else {
-    digitalWrite(STATUS_LED, HIGH); // ดับ
+    digitalWrite(STATUS_LED, HIGH); // ดับ = ปกติ/ไม่ชาร์จ
   }
-
-  lastVoltage = voltage;
 }
 
 // ===== Packet (ส่งหลายค่าแบบ binary) =====
@@ -237,48 +294,47 @@ void loop() {
     Serial.print(" F:");
     Serial.println(filtered_force, 3);
 
-    // ===== อัปเดต LED สถานะแบต =====
-    float batteryVoltage = readBatteryVoltage();
-    uint8_t battery = batteryPercent(batteryVoltage);
-    updateStatusLED(batteryVoltage, battery);
+    // ===== อ่านแบต + กรอง EMA + อัปเดต LED (ใช้ค่ากรองแล้วร่วมกันทั้งหมด) =====
+    float rawBatteryVoltage = readBatteryVoltage();
 
-    // ===== ส่ง BLE (binary packet) =====
-  if (deviceConnected) {
+    if (filteredVoltage == 0.0) filteredVoltage = rawBatteryVoltage; // ค่าเริ่มต้นรอบแรก
+    filteredVoltage = (VOLTAGE_ALPHA * rawBatteryVoltage) + ((1.0 - VOLTAGE_ALPHA) * filteredVoltage);
 
-    float safe_force =
-        (filtered_force < 0.0f)
-        ? 0.0f
-        : filtered_force;
+    uint8_t battery = batteryPercent(filteredVoltage);
+    updateStatusLED(battery);
 
-    int rawADC = analogRead(BATTERY_PIN);
-int mv = analogReadMilliVolts(BATTERY_PIN);
+    Serial.print(" Battery: ");
+    Serial.print(filteredVoltage, 2);
+    Serial.print("V (");
+    Serial.print(battery);
+    Serial.println("%)");
 
-Serial.print("ADC=");
-Serial.print(rawADC);
-Serial.print(" mV=");
-Serial.println(mv);
+    // ===== ส่ง BLE =====
+    if (deviceConnected) {
 
-float batteryVoltage = readBatteryVoltage();
-uint8_t battery = batteryPercent(batteryVoltage);
+      float safe_force =
+          (filtered_force < 0.0f)
+          ? 0.0f
+          : filtered_force;
 
-Serial.print(" Battery: ");
-Serial.print(batteryVoltage, 2);
-Serial.print("V (");
-Serial.print(battery);
-Serial.println("%)");
+      DataPacket data = {
+          safe_force,
+          battery
+      };
 
-    DataPacket data = {
-        safe_force,
-        battery
-    };
+      pCharacteristic->setValue(
+          (uint8_t*)&data,
+          sizeof(data)
+      );
 
-    pCharacteristic->setValue(
-        (uint8_t*)&data,
-        sizeof(data)
-    );
-    pCharacteristic->notify();
-}
+      pCharacteristic->notify();
 
-  delay(20);
+      Serial.print("BLE SEND: force=");
+      Serial.print(safe_force, 3);
+      Serial.print(" battery=");
+      Serial.println(battery);
+    }
+
+    delay(200);
   }
 }

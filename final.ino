@@ -19,6 +19,12 @@ const int I2C_SCL = 18;
 // const int DRDY = 10;
 const int BATTERY_PIN = A1;   // GPIO2 = A0.
 
+// ===== Status LED =====
+#define STATUS_LED 15   // built-in yellow LED, active-low (LOW = ติด)
+float lastVoltage = 0.0;
+unsigned long lastBlink = 0;
+bool ledState = false;
+
 // ===== BLE =====
 BLEServer* pServer = NULL;
 BLECharacteristic* pCharacteristic = NULL;
@@ -93,6 +99,26 @@ uint8_t batteryPercent(float v) {
   return 0;
 }
 
+// ===== Status LED: กะพริบ = กำลังชาร์จ, ติดค้าง = แบตเต็ม, ดับ = ปกติ =====
+void updateStatusLED(float voltage, uint8_t percent) {
+  bool full = (percent >= 98);
+  bool charging = (voltage > lastVoltage + 0.01);
+
+  if (full) {
+    digitalWrite(STATUS_LED, LOW); // ติดค้าง
+  } else if (charging) {
+    if (millis() - lastBlink > 500) {
+      ledState = !ledState;
+      digitalWrite(STATUS_LED, ledState ? LOW : HIGH);
+      lastBlink = millis();
+    }
+  } else {
+    digitalWrite(STATUS_LED, HIGH); // ดับ
+  }
+
+  lastVoltage = voltage;
+}
+
 // ===== Packet (ส่งหลายค่าแบบ binary) =====
 struct DataPacket {
   float force;
@@ -151,8 +177,13 @@ void setupBLE() {
 void setup() {
   Serial.begin(115200);
   pinMode(BATTERY_PIN, INPUT);
-analogReadResolution(12);
-analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
+  analogReadResolution(12);
+  analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
+
+  pinMode(STATUS_LED, OUTPUT);
+  digitalWrite(STATUS_LED, HIGH); // ปิดไว้ก่อน
+  lastVoltage = readBatteryVoltage(); // baseline สำหรับเช็คการชาร์จ
+
   Serial.println("เริ่มระบบวัดแรง CTAR (NAU7802)...");
 
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -164,7 +195,7 @@ analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
 
   Serial.println("พบ NAU7802 แล้ว");
 
-
+  myScale.setGain(NAU7802_GAIN_1);
   myScale.setSampleRate(NAU7802_SPS_80);
   myScale.calibrateAFE();
 
@@ -206,77 +237,48 @@ void loop() {
     Serial.print(" F:");
     Serial.println(filtered_force, 3);
 
+    // ===== อัปเดต LED สถานะแบต =====
+    float batteryVoltage = readBatteryVoltage();
+    uint8_t battery = batteryPercent(batteryVoltage);
+    updateStatusLED(batteryVoltage, battery);
+
     // ===== ส่ง BLE (binary packet) =====
-//   if (deviceConnected) {
-
-//     float safe_force =
-//         (filtered_force < 0.0f)
-//         ? 0.0f
-//         : filtered_force;
-
-//     int rawADC = analogRead(BATTERY_PIN);
-// int mv = analogReadMilliVolts(BATTERY_PIN);
-
-// Serial.print("ADC=");
-// Serial.print(rawADC);
-// Serial.print(" mV=");
-// Serial.println(mv);
-
-// float batteryVoltage = readBatteryVoltage();
-// uint8_t battery = batteryPercent(batteryVoltage);
-
-// Serial.print(" Battery: ");
-// Serial.print(batteryVoltage, 2);
-// Serial.print("V (");
-// Serial.print(battery);
-// Serial.println("%)");
-
-//     DataPacket data = {
-//         safe_force,
-//         battery
-//     };
-
-//     pCharacteristic->setValue(
-//         (uint8_t*)&data,
-//         sizeof(data)
-//     );
-//     pCharacteristic->notify();
-// }
-//test
-if (deviceConnected) {
+  if (deviceConnected) {
 
     float safe_force =
         (filtered_force < 0.0f)
         ? 0.0f
         : filtered_force;
 
-    float batteryVoltage = readBatteryVoltage();
-    uint8_t battery = batteryPercent(batteryVoltage);
+    int rawADC = analogRead(BATTERY_PIN);
+int mv = analogReadMilliVolts(BATTERY_PIN);
 
-    // ส่งข้อมูลสั้น ๆ
-    char message[32];
+Serial.print("ADC=");
+Serial.print(rawADC);
+Serial.print(" mV=");
+Serial.println(mv);
 
-    snprintf(
-        message,
-        sizeof(message),
-        "%.2f,%.2f,%d",
+float batteryVoltage = readBatteryVoltage();
+uint8_t battery = batteryPercent(batteryVoltage);
+
+Serial.print(" Battery: ");
+Serial.print(batteryVoltage, 2);
+Serial.print("V (");
+Serial.print(battery);
+Serial.println("%)");
+
+    DataPacket data = {
         safe_force,
-        batteryVoltage,
         battery
-    );
+    };
 
     pCharacteristic->setValue(
-        (uint8_t*)message,
-        strlen(message)
+        (uint8_t*)&data,
+        sizeof(data)
     );
-
     pCharacteristic->notify();
-
-    Serial.print("BLE SEND: ");
-    Serial.println(message);
 }
 
-  delay(200);
+  delay(20);
   }
 }
-

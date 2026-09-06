@@ -37,7 +37,11 @@ BLECharacteristic* pCharacteristic = NULL;
 bool deviceConnected = false;
 
 // ===== Calibration =====
-float CALIBRATION_FACTOR = 2300;
+
+// float CALIBRATION_FACTOR = 326500;
+
+float CALIBRATION_FACTOR = 326496;
+
 
 // ===== Filter =====
 const float ALPHA = 0.2;
@@ -166,20 +170,20 @@ void updateStatusLED(uint8_t percent, float batteryVoltage) {
   bool usbConnected = isUSBConnected();
   bool batteryPresent = isBatteryPresent(batteryVoltage);
 
-  // ===== Debug =====
-  Serial.print("[STATUS] USB: ");
-  Serial.print(usbConnected ? "CONNECTED" : "NOT CONNECTED");
+  // // ===== Debug =====
+  // Serial.print("[STATUS] USB: ");
+  // Serial.print(usbConnected ? "CONNECTED" : "NOT CONNECTED");
 
-  Serial.print(" | Battery: ");
-  Serial.print(batteryPresent ? "PRESENT" : "NOT PRESENT");
+  // Serial.print(" | Battery: ");
+  // Serial.print(batteryPresent ? "PRESENT" : "NOT PRESENT");
 
-  Serial.print(" | Voltage: ");
-  Serial.print(batteryVoltage, 2);
+  // Serial.print(" | Voltage: ");
+  // Serial.print(batteryVoltage, 2);
 
-  Serial.print("V | ");
-  Serial.print(percent);
+  // Serial.print("V | ");
+  // Serial.print(percent);
 
-  Serial.println("%");
+  // Serial.println("%");
 
 
   // =================================================
@@ -386,7 +390,7 @@ void setup() {
 
 
   myScale.setGain(
-    NAU7802_GAIN_1
+    NAU7802_GAIN_128
   );
 
   myScale.setSampleRate(
@@ -460,10 +464,10 @@ void loop() {
     // Reset เมื่อแรงเกิน
     // =================================================
 
-    if (filtered_weight > 7.0) {
+    if (filtered_weight > 10.0) {
 
       Serial.println(
-        "Force > 7kg → Restart"
+        "Force > 10kg → Restart"
       );
 
       delay(500);
@@ -537,20 +541,20 @@ void loop() {
     );
 
 
-    Serial.print("Battery: ");
+    // Serial.print("Battery: ");
 
-    Serial.print(
-      filteredVoltage,
-      2
-    );
+    // Serial.print(
+    //   filteredVoltage,
+    //   2
+    // );
 
-    Serial.print("V (");
+    // Serial.print("V (");
 
-    Serial.print(
-      battery
-    );
+    // Serial.print(
+    //   battery
+    // );
 
-    Serial.println("%)");
+    // Serial.println("%)");
 
 
     // =================================================

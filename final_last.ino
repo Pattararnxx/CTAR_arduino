@@ -20,7 +20,7 @@ const int I2C_SCL = 18;
 
 // ===== Battery / active-low built-in LED =====
 constexpr uint8_t BATTERY_PIN = A1;
-constexpr float DIVIDER_RATIO = 2.0f;
+constexpr float DIVIDER_RATIO = 2.02f;
 constexpr float CALIBRATION_GAIN = 1.0f;
 constexpr uint16_t SAMPLE_COUNT = 128;
 constexpr float BATTERY_EMPTY_V = 3.2f;
@@ -66,7 +66,7 @@ uint32_t lastToggleMs = 0;
 
 void setBatteryLed(float batteryV, uint32_t now) {
   LedMode next;
-  if (batteryV > 4.1f || batteryV < 2.5f) next = LedMode::Off;
+  if (batteryV > 3.96f || batteryV < 2.5f) next = LedMode::Off;
   else if (batteryV >= 3.65f) next = LedMode::On;
   else if (batteryV < 3.3f) next = LedMode::FastBlink;
   else next = LedMode::Blink;

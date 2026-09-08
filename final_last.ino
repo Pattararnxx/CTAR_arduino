@@ -25,6 +25,7 @@ constexpr float CALIBRATION_GAIN = 1.0f;
 constexpr uint16_t SAMPLE_COUNT = 128;
 constexpr float BATTERY_EMPTY_V = 3.2f;
 constexpr float BATTERY_FULL_V = 3.92f;
+constexpr float BATTERY_NOT_DETECTED_V = 3.96f;
 #define STATUS_LED LED_BUILTIN
 bool batteryReady = false;
 uint8_t latestBatteryPercent = 0;
@@ -52,8 +53,10 @@ const float VOLTAGE_ALPHA = 0.2;
 
 
 // Voltage-based estimate: 3.20 V = 0%, 3.92 V = 100%.
+// Above 3.96 V is treated as battery not detected and reports 0%.
 // This is a linear display scale, not a measured state of charge.
 uint8_t batteryPercent(float v) {
+  if (v > BATTERY_NOT_DETECTED_V) return 0;
   if (v <= BATTERY_EMPTY_V) return 0;
   if (v >= BATTERY_FULL_V) return 100;
   return uint8_t((v - BATTERY_EMPTY_V) * 100.0f /
@@ -66,7 +69,7 @@ uint32_t lastToggleMs = 0;
 
 void setBatteryLed(float batteryV, uint32_t now) {
   LedMode next;
-  if (batteryV > 3.96f || batteryV < 2.5f) next = LedMode::Off;
+  if (batteryV > BATTERY_NOT_DETECTED_V || batteryV < 2.5f) next = LedMode::Off;
   else if (batteryV >= 3.65f) next = LedMode::On;
   else if (batteryV < 3.3f) next = LedMode::FastBlink;
   else next = LedMode::Blink;
@@ -110,12 +113,16 @@ void serviceBattery(uint32_t now) {
   if (++count == SAMPLE_COUNT) {
     const float batteryV = (sumMv / float(SAMPLE_COUNT)) *
                            DIVIDER_RATIO * CALIBRATION_GAIN / 1000.0f;
-    if (!batteryReady) filteredVoltage = batteryV;
+    // Apply missing-battery readings immediately and restart smoothing on recovery.
+    if (!batteryReady || batteryV > BATTERY_NOT_DETECTED_V ||
+        filteredVoltage > BATTERY_NOT_DETECTED_V) filteredVoltage = batteryV;
     else filteredVoltage += VOLTAGE_ALPHA * (batteryV - filteredVoltage);
     batteryReady = true;
     latestBatteryPercent = batteryPercent(filteredVoltage);
     setBatteryLed(batteryV, now);
-    Serial.printf("Battery: %.3f V\n", batteryV);
+    Serial.printf("Battery: %.3f V | %u%%%s\n", batteryV,
+                  unsigned(latestBatteryPercent),
+                  batteryV > BATTERY_NOT_DETECTED_V ? " | Not detected" : "");
     sumMv = 0;
     count = 0;
   }

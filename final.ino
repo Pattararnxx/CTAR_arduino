@@ -21,7 +21,7 @@ const int BATTERY_PIN = A1;
 
 // แรงดันขั้นต่ำที่ถือว่า "มีแบตเตอรี่"
 // ใช้แค่ตรวจว่ามีแบตหรือไม่ ไม่ได้ใช้ตรวจ Charging
-const float BATTERY_PRESENT_VOLTAGE = 2.70f;
+const float BATTERY_PRESENT_VOLTAGE = 2.0f;
 
 // ===== Status LED =====
 #define STATUS_LED 15   // built-in yellow LED, active-low
